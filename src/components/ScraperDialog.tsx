@@ -77,7 +77,8 @@ export const ScraperDialog: React.FC<ScraperDialogProps> = ({ isOpen, onClose })
     try {
       const res = await fetch(`${API_BASE}/api/workspaces`);
       if (res.ok) {
-        const data = await res.json();
+        const jsonRes = await res.json();
+        const data = JSON.parse(atob(jsonRes.data));
         setWorkspaces(data);
       }
     } catch (e) {
@@ -87,9 +88,16 @@ export const ScraperDialog: React.FC<ScraperDialogProps> = ({ isOpen, onClose })
 
   const fetchWorkspaceChannels = async (workspaceId: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/workspace-channels?workspace_id=${workspaceId}`);
+      const res = await fetch(`${API_BASE}/api/workspace-channels`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain',
+        },
+        body: btoa(JSON.stringify({ workspace_id: workspaceId })),
+      });
       if (res.ok) {
-        const data: Channel[] = await res.json();
+        const jsonRes = await res.json();
+        const data: Channel[] = JSON.parse(atob(jsonRes.data));
         setAvailableChannels(data);
         // By default, select all ACTIVE channels, or all if none specified
         const activeIds = data.filter(c => c.status === 'active' || !c.status).map(c => c.id);

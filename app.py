@@ -10,6 +10,8 @@ from flask_cors import CORS
 import os
 import sys
 import traceback
+import json
+import base64
 
 # Ensure imports resolve from this directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -32,7 +34,9 @@ def get_workspaces():
     """Return all workspaces from Workspace_information.csv."""
     try:
         workspaces = load_workspace_metadata()
-        return jsonify([{"id": ws[0], "name": ws[1]} for ws in workspaces])
+        payload = [{"id": ws[0], "name": ws[1]} for ws in workspaces]
+        encoded = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("utf-8")
+        return jsonify({"data": encoded})
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -44,10 +48,20 @@ def get_channels():
     return jsonify([{"id": k, "name": v} for k, v in CHANNEL_LABELS.items()])
 
 
-@app.route("/api/workspace-channels")
+@app.route("/api/workspace-channels", methods=["POST"])
 def get_workspace_channels():
     """Return channels configured for a workspace with their status."""
-    workspace_id = request.args.get("workspace_id")
+    try:
+        raw_body = request.get_data(as_text=True)
+        if raw_body:
+            decoded_body = base64.b64decode(raw_body).decode("utf-8")
+            data = json.loads(decoded_body)
+        else:
+            data = {}
+    except Exception as e:
+        return jsonify({"error": f"Invalid payload: {str(e)}"}), 400
+
+    workspace_id = data.get("workspace_id")
     if not workspace_id:
         return jsonify({"error": "Missing workspace_id parameter"}), 400
 
@@ -65,7 +79,9 @@ def get_workspace_channels():
                     "status": status,
                 })
         channels.sort(key=lambda x: x["name"])
-        return jsonify(channels)
+        
+        encoded = base64.b64encode(json.dumps(channels).encode("utf-8")).decode("utf-8")
+        return jsonify({"data": encoded})
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500

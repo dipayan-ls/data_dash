@@ -43,6 +43,9 @@ class _TokenManager:
             return self.access_token  # type: ignore
 
     def _refresh(self):
+        if not CLIENT_ID or not CLIENT_SECRET:
+            raise RuntimeError("MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET are missing from the environment. Please configure them in Render.")
+
         payload = {
             "client_id": CLIENT_ID,
             "client_secret": CLIENT_SECRET,

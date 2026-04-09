@@ -21,6 +21,9 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 
 def _get_access_token(refresh_token: str) -> str:
+    if not CLIENT_ID or not CLIENT_SECRET:
+        raise RuntimeError("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are missing from the environment. Please configure them in Render.")
+
     payload = {
         "grant_type": "refresh_token",
         "client_id": CLIENT_ID,
