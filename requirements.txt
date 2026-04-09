@@ -1,0 +1,10 @@
+flask
+flask-cors
+requests
+requests-oauthlib
+google-cloud-bigquery
+google-cloud-datastore
+google-auth
+tabulate
+questionary
+gunicorn

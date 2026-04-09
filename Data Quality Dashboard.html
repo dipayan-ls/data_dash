@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Integrity Dashboard | BQ vs API</title>
+    
+    <!-- Tailwind CSS for Styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js for Visuals -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- PapaParse for CSV Uploads (Large File Support) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .card { transition: all 0.3s ease; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+        .nav-item.active { background-color: #3b82f6; color: white; }
+        .nav-item { transition: background-color 0.2s, color 0.2s; }
+        .table-row-danger { background-color: #fef2f2; border-left: 4px solid #ef4444; }
+        .table-row-success { border-left: 4px solid #10b981; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Loader */
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="w-64 bg-white shadow-lg z-10 hidden md:flex flex-col flex-shrink-0">
+        <div class="p-6 border-b border-gray-100 flex items-center gap-3">
+            <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">D</div>
+            <h1 class="text-xl font-bold text-gray-800">DataAudit</h1>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto p-4 space-y-2" id="sidebar-nav">
+            <!-- Default Overview Tab -->
+            <button onclick="switchTab('overview')" id="nav-overview" class="nav-item active w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-50">
+                <i class="fa-solid fa-layer-group w-5"></i> Overview
+            </button>
+            <button onclick="switchTab('datasource')" id="nav-datasource" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-50">
+                <i class="fa-solid fa-database w-5"></i> Data Source
+            </button>
+            <div class="border-t border-gray-100 my-2 pt-2">
+                <p class="text-xs uppercase text-gray-400 font-bold px-4 mb-2">Channels</p>
+                <div id="dynamic-channels">
+                    <p class="text-xs text-gray-400 px-4 italic">Upload data to see channels</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-4 border-t border-gray-100 bg-gray-50">
+            <div class="bg-white p-4 rounded-xl border border-blue-100 shadow-sm">
+                <h4 class="text-sm font-semibold text-blue-800 mb-1">Upload CSV</h4>
+                <p class="text-xs text-gray-500 mb-3">Supports >300MB files</p>
+                <label class="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 px-4 rounded w-full block text-center transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-upload"></i> Choose File
+                    <input type="file" id="csvInput" class="hidden" accept=".csv">
+                </label>
+                <div id="upload-status" class="mt-2 text-xs text-center text-gray-500 hidden">
+                    <div class="flex justify-center items-center gap-2">
+                        <div class="loader"></div> Processing...
+                    </div>
+                    <span id="progress-text">0%</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-y-auto relative w-full flex flex-col">
+        <!-- Header -->
+        <header class="bg-white p-6 shadow-sm sticky top-0 z-20 flex justify-between items-center flex-shrink-0">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800" id="page-title">Overall Health</h2>
+                <p class="text-sm text-gray-500" id="sub-title">Comparing BigQuery Warehouse vs. Ad Platform APIs</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="text-xs font-mono bg-blue-50 text-blue-700 px-3 py-1.5 rounded border border-blue-100" id="record-count-badge">No Data</span>
+            </div>
+        </header>
+
+        <!-- Filters Bar -->
+        <div id="filter-bar" class="px-8 py-3 bg-white border-b border-gray-100 flex flex-wrap gap-4 items-center shadow-sm hidden z-10">
+            <!-- Workspace Filter -->
+            <div class="flex items-center gap-2 bg-gray-50 p-1 rounded-md border border-gray-200">
+                <span class="text-xs font-bold text-gray-500 uppercase px-2">Workspace:</span>
+                <select id="filter-workspace" class="text-sm bg-transparent border-0 focus:ring-0 text-gray-700 p-1 pr-6 cursor-pointer" style="min-width: 120px;">
+                    <option value="">All Workspaces</option>
+                </select>
+            </div>
+
+            <!-- Date Filter -->
+            <div class="flex items-center gap-2 bg-gray-50 p-1 rounded-md border border-gray-200">
+                <span class="text-xs font-bold text-gray-500 uppercase px-2">Date:</span>
+                <input type="date" id="filter-start" class="text-sm bg-transparent border-0 focus:ring-0 text-gray-700 p-1">
+                <span class="text-gray-400">-</span>
+                <input type="date" id="filter-end" class="text-sm bg-transparent border-0 focus:ring-0 text-gray-700 p-1">
+            </div>
+            
+            <!-- Sort -->
+            <div class="flex items-center gap-2 bg-gray-50 p-1 rounded-md border border-gray-200 ml-auto">
+                <span class="text-xs font-bold text-gray-500 uppercase px-2">Sort:</span>
+                <select id="filter-sort" class="text-sm bg-transparent border-0 focus:ring-0 text-gray-700 p-1 pr-6 cursor-pointer">
+                    <option value="date-desc">Date: Newest</option>
+                    <option value="date-asc">Date: Oldest</option>
+                    <option value="diff-desc">Diff %: High to Low</option>
+                    <option value="diff-asc">Diff %: Low to High</option>
+                    <option value="spend-desc">Spend: High to Low</option>
+                    <option value="spend-asc">Spend: Low to High</option>
+                </select>
+            </div>
+            
+            <button onclick="applyFilters()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-md shadow-sm transition uppercase tracking-wide">
+                Apply Filters
+            </button>
+            <button onclick="clearFilters()" class="text-gray-400 hover:text-gray-600 text-xs font-bold px-2 py-2 transition">
+                Reset
+            </button>
+        </div>
+
+        <!-- Content Container -->
+        <div class="p-8 max-w-7xl mx-auto space-y-8 flex-1 w-full" id="content-area">
+            <!-- Dynamic Content injected here -->
+            <div class="bg-white p-12 rounded-xl text-center border border-gray-200 border-dashed mt-10">
+                <i class="fa-solid fa-file-csv text-4xl text-gray-300 mb-4"></i>
+                <h3 class="text-lg font-bold text-gray-700">Waiting for Data</h3>
+                <p class="text-gray-500">Upload a large CSV file to begin analysis.</p>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // --- 1. CONFIGURATION & ICONS ---
+        const ICONS = {
+            'Google': 'fa-google',
+            'YouTube': 'fa-youtube',
+            'Facebook': 'fa-facebook',
+            'Instagram': 'fa-instagram',
+            'Microsoft': 'fa-microsoft',
+            'TikTok': 'fa-tiktok',
+            'Snapchat': 'fa-snapchat',
+            'X (Twitter)': 'fa-twitter',
+            'LinkedIn': 'fa-linkedin',
+            'Pinterest': 'fa-pinterest',
+            'Amazon Ads': 'fa-amazon',
+            'Criteo': 'fa-bullhorn', 
+            'StackAdapt': 'fa-layer-group', 
+            'CJ Affiliate': 'fa-handshake', 
+            'GA4': 'fa-chart-line', 
+            'default': 'fa-chart-pie' 
+        };
+
+        // --- 2. STATE MANAGEMENT ---
+        let processedRows = []; // Flat array of all aggregated daily-account level data
+        let uniqueWorkspaces = new Set();
+        let uniqueGroups = new Set();
+        
+        let currentChart = null;
+        let globalRecordCount = 0;
+        let activeGroup = 'overview';
+        let paginationState = { page: 1, limit: 20 };
+        
+        let filterState = {
+            workspace: '',
+            start: null,
+            end: null,
+            sort: 'date-desc'
+        };
+
+        // --- 3. SOURCE NORMALIZATION (Fuzzy Matcher) ---
+        function getChannelGroup(rawSource) {
+            const s = rawSource.toLowerCase().replace(/[^a-z0-9]/g, ''); 
+
+            if (s.includes('google') || s.includes('GOOGLE') || s.includes('Google')) return 'Google';
+            if (s.includes('youtube') || s.includes('Youtube') || s.includes('yt') || s.includes('YOUTUBE') || s.includes('YT')) return 'YouTube';
+            if (s.includes('facebook') || s.includes('fb') || s.includes('FACEBOOK') || s.includes('Facebook') || s.includes('FB')) return 'Facebook';
+            if (s.includes('instagram') || s.includes('Instagram') || s.includes('ig') || s.includes('insta') || s.includes('IG')) return 'Instagram';
+            if (s.includes('microsoft') || s.includes('bing') || s.includes('Bing') || s.includes('Microsoft') || s.includes('MICROSOFT') || s.includes('BING')) return 'Microsoft';
+            if (s.includes('tiktok') || s.includes('tt')) return 'TikTok';
+            if (s.includes('snapchat') || s.includes('snap')) return 'Snapchat';
+            if (s.includes('twitter') || s.includes('x') || s.includes('twt')) return 'X (Twitter)';
+            if (s.includes('linkedin') || s.includes('li')) return 'LinkedIn';
+            if (s.includes('pinterest') || s.includes('pin')) return 'Pinterest';
+            if (s.includes('amazon')) return 'Amazon Ads';
+            if (s.includes('criteo')) return 'Criteo';
+            if (s.includes('stackadapt')) return 'StackAdapt';
+            if (s.includes('cj') || s.includes('cj_affiliate') || s.includes('CJ') || s.includes('CJ_AFFILIATE')) return 'CJ Affiliate';
+            if (s.includes('ga4') || s.includes('analytics') || s.includes('GA4')) return 'GA4';
+            
+            return rawSource.charAt(0).toUpperCase() + rawSource.slice(1);
+        }
+
+        // --- 4. CSV STREAMING ENGINE ---
+        // Temporary storage map to handle sum duplicates during stream
+        let streamStorage = {}; // Key: "Group|Workspace|Account|Date"
+
+        document.getElementById('csvInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // Reset UI & Data
+            document.getElementById('upload-status').classList.remove('hidden');
+            document.getElementById('progress-text').innerText = "Starting stream...";
+            globalRecordCount = 0;
+            streamStorage = {};
+            uniqueWorkspaces.clear();
+            uniqueGroups.clear();
+            processedRows = [];
+
+            const fileSize = file.size;
+            let processedSize = 0;
+
+            Papa.parse(file, {
+                header: true,
+                worker: true, 
+                skipEmptyLines: true,
+                step: function(row) {
+                    processRow(row.data);
+                    processedSize += JSON.stringify(row.data).length;
+                    globalRecordCount++;
+                    if (globalRecordCount % 5000 === 0) {
+                        // Optional progress logic here
+                    }
+                },
+                complete: function() {
+                    // Convert Storage Map to Flat Array for easier Filtering later
+                    processedRows = Object.values(streamStorage);
+                    streamStorage = {}; // Free memory
+
+                    document.getElementById('upload-status').classList.add('hidden');
+                    document.getElementById('record-count-badge').textContent = `${globalRecordCount.toLocaleString()} Rows Scanned`;
+                    
+                    // Populate Filters & Sidebar
+                    populateWorkspaceFilter();
+                    document.getElementById('filter-bar').classList.remove('hidden');
+                    document.getElementById('filter-bar').classList.add('flex');
+                    
+                    buildSidebar();
+                    switchTab('overview');
+                }
+            });
+        });
+
+        function processRow(row) {
+            if (!row.date || !row.source) return;
+
+            const date = row.date.trim();
+            const rawSource = row.source.toLowerCase().trim();
+            const groupName = getChannelGroup(rawSource);
+            
+            // Handle variations of workspace/account columns
+            const workspace = (row.workspace_name || row.workspace || 'Unknown').trim();
+            const accountId = (row.ad_account_id || row.ad_account || row.account_id || 'N/A').trim();
+
+            uniqueGroups.add(groupName);
+            uniqueWorkspaces.add(workspace);
+
+            // Create unique key for aggregation: Group + Workspace + Account + Date
+            const uniqueKey = `${groupName}|${workspace}|${accountId}|${date}`;
+
+            if (!streamStorage[uniqueKey]) {
+                streamStorage[uniqueKey] = {
+                    group: groupName,
+                    workspace: workspace,
+                    account: accountId,
+                    date: date,
+                    api_impressions: 0,
+                    api_clicks: 0,
+                    api_spends: 0,
+                    bigquery_impressions: 0,
+                    bigquery_clicks: 0,
+                    bigquery_spends: 0
+                };
+            }
+
+            const d = streamStorage[uniqueKey];
+            d.api_impressions += parseFloat(row.api_impressions || 0);
+            d.api_clicks += parseFloat(row.api_clicks || 0);
+            d.api_spends += parseFloat(row.api_spends || 0);
+            d.bigquery_impressions += parseFloat(row.bigquery_impressions || 0);
+            d.bigquery_clicks += parseFloat(row.bigquery_clicks || 0);
+            d.bigquery_spends += parseFloat(row.bigquery_spends || 0);
+        }
+
+        // --- 5. FILTERS & SORTING LOGIC ---
+        function populateWorkspaceFilter() {
+            const select = document.getElementById('filter-workspace');
+            select.innerHTML = '<option value="">All Workspaces</option>';
+            const sorted = Array.from(uniqueWorkspaces).sort();
+            sorted.forEach(ws => {
+                if(ws !== 'Unknown') {
+                    const opt = document.createElement('option');
+                    opt.value = ws;
+                    opt.innerText = ws;
+                    select.appendChild(opt);
+                }
+            });
+        }
+
+        function applyFilters() {
+            filterState.workspace = document.getElementById('filter-workspace').value;
+            filterState.start = document.getElementById('filter-start').value;
+            filterState.end = document.getElementById('filter-end').value;
+            filterState.sort = document.getElementById('filter-sort').value;
+            switchTab(activeGroup); 
+        }
+
+        function clearFilters() {
+            document.getElementById('filter-workspace').value = '';
+            document.getElementById('filter-start').value = '';
+            document.getElementById('filter-end').value = '';
+            document.getElementById('filter-sort').value = 'date-desc';
+            applyFilters();
+        }
+
+        // Core Data Retrieval Function
+        function getFilteredData(targetGroup) {
+            // 1. Filter
+            let filtered = processedRows.filter(d => {
+                if (targetGroup !== 'overview' && d.group !== targetGroup) return false;
+                if (filterState.workspace && d.workspace !== filterState.workspace) return false;
+                if (filterState.start && d.date < filterState.start) return false;
+                if (filterState.end && d.date > filterState.end) return false;
+                return true;
+            });
+
+            // 2. Sort
+            filtered.sort((a, b) => {
+                const dateA = new Date(a.date);
+                const dateB = new Date(b.date);
+                
+                const diffA = Math.abs(a.api_spends - a.bigquery_spends);
+                const pctA = a.bigquery_spends > 0 ? (diffA / a.bigquery_spends) : 0;
+                
+                const diffB = Math.abs(b.api_spends - b.bigquery_spends);
+                const pctB = b.bigquery_spends > 0 ? (diffB / b.bigquery_spends) : 0;
+
+                switch(filterState.sort) {
+                    case 'date-asc': return dateA - dateB;
+                    case 'date-desc': return dateB - dateA;
+                    case 'diff-desc': return pctB - pctA;
+                    case 'diff-asc': return pctA - pctB;
+                    case 'spend-desc': return b.bigquery_spends - a.bigquery_spends;
+                    case 'spend-asc': return a.bigquery_spends - b.bigquery_spends;
+                    default: return dateB - dateA;
+                }
+            });
+
+            return filtered;
+        }
+
+        // --- 6. UI BUILDERS ---
+
+        function buildSidebar() {
+            const container = document.getElementById('dynamic-channels');
+            container.innerHTML = ''; 
+
+            const groups = Array.from(uniqueGroups).sort();
+            
+            groups.forEach(group => {
+                const btn = document.createElement('button');
+                btn.id = `nav-${group.replace(/[^a-zA-Z0-9]/g, '-')}`;
+                btn.className = 'nav-item w-full flex items-center gap-3 px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-50 text-sm';
+                btn.onclick = () => switchTab(group);
+                
+                let iconClass = ICONS[group] || ICONS['default'];
+                btn.innerHTML = `<i class="fa-brands ${iconClass} w-5 text-center"></i> ${group}`;
+                container.appendChild(btn);
+            });
+        }
+
+        function switchTab(groupName) {
+            activeGroup = groupName;
+            paginationState.page = 1;
+
+            // Update Nav Styles
+            document.querySelectorAll('.nav-item').forEach(el => {
+                el.classList.remove('active', 'bg-blue-600', 'text-white');
+                el.classList.add('text-gray-600');
+            });
+
+            let activeId;
+            if (groupName === 'overview') activeId = 'nav-overview';
+            else if (groupName === 'datasource') activeId = 'nav-datasource';
+            else activeId = `nav-${groupName.replace(/[^a-zA-Z0-9]/g, '-')}`;
+
+            const activeBtn = document.getElementById(activeId);
+            if(activeBtn) {
+                activeBtn.classList.add('active', 'bg-blue-600', 'text-white');
+                activeBtn.classList.remove('text-gray-600');
+            }
+
+            const content = document.getElementById('content-area');
+            const title = document.getElementById('page-title');
+            content.innerHTML = '';
+            
+            if(currentChart) { currentChart.destroy(); currentChart = null; }
+
+            if (groupName === 'overview') {
+                title.textContent = 'Executive Summary';
+                renderOverview(content);
+            } else if (groupName === 'datasource') {
+                title.textContent = 'Data Source Configuration';
+                renderDataSource(content);
+            } else {
+                title.textContent = `${groupName} Performance`;
+                renderChannelDetail(content, groupName);
+            }
+        }
+
+        // --- 7. RENDERERS ---
+
+        function renderOverview(container) {
+            // Get all data matching filters (Workspace/Date), ignoring Group
+            const data = getFilteredData('overview');
+            
+            if (data.length === 0) {
+                container.innerHTML = '<div class="text-center text-gray-400 mt-10">No data matches current filters.</div>';
+                return;
+            }
+
+            // Aggregate by Group for Cards
+            const groupStats = {};
+            data.forEach(d => {
+                if(!groupStats[d.group]) groupStats[d.group] = { totalSpend: 0, totalDiff: 0, issues: 0 };
+                
+                const diff = d.api_spends - d.bigquery_spends;
+                const pct = d.bigquery_spends > 0 ? (diff / d.bigquery_spends) * 100 : 0;
+                
+                groupStats[d.group].totalSpend += d.bigquery_spends;
+                groupStats[d.group].totalDiff += diff;
+                if(Math.abs(pct) > 1 && d.bigquery_spends > 5) groupStats[d.group].issues++;
+            });
+
+            const grid = document.createElement('div');
+            grid.className = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6';
+
+            Object.keys(groupStats).sort().forEach(group => {
+                const s = groupStats[group];
+                const isHealthy = s.issues === 0;
+                const icon = ICONS[group] || ICONS['default'];
+
+                const card = document.createElement('div');
+                card.className = 'card bg-white p-6 rounded-xl border border-gray-100 cursor-pointer';
+                card.onclick = () => switchTab(group);
+                card.innerHTML = `
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="w-10 h-10 rounded-full ${isHealthy ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'} flex items-center justify-center text-lg">
+                            <i class="fa-brands ${icon}"></i>
+                        </div>
+                        <span class="text-xs font-bold px-2 py-1 rounded ${isHealthy ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}">
+                            ${isHealthy ? 'HEALTHY' : 'NEEDS REVIEW'}
+                        </span>
+                    </div>
+                    <h3 class="font-bold text-gray-800 text-lg">${group}</h3>
+                    <div class="mt-4 space-y-2">
+                         <div class="flex justify-between text-sm">
+                            <span class="text-gray-500">Total Spend (BQ)</span>
+                            <span class="font-medium">${formatCurrency(s.totalSpend)}</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span class="text-gray-500">Net Variance</span>
+                            <span class="font-medium ${Math.abs(s.totalDiff) < 1 ? 'text-gray-700' : 'text-red-600'}">${formatCurrency(s.totalDiff)}</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span class="text-gray-500">Discrepancy Days</span>
+                            <span class="font-medium ${s.issues > 0 ? 'text-red-600' : 'text-gray-700'}">${s.issues}</span>
+                        </div>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+            container.appendChild(grid);
+        }
+
+        function renderChannelDetail(container, groupName) {
+            const dataArray = getFilteredData(groupName);
+
+            // 1. Chart Section - Need to Aggregate by Date for Visualization
+            const chartWrapper = document.createElement('div');
+            chartWrapper.className = 'bg-white p-6 rounded-xl shadow-sm h-96 mb-6';
+            chartWrapper.innerHTML = '<canvas id="detailChart"></canvas>';
+            container.appendChild(chartWrapper);
+
+            // Aggregate data by Date for the chart
+            const chartMap = {};
+            dataArray.forEach(d => {
+                if(!chartMap[d.date]) chartMap[d.date] = { date: d.date, bq: 0, api: 0 };
+                chartMap[d.date].bq += d.bigquery_spends;
+                chartMap[d.date].api += d.api_spends;
+            });
+            const chartData = Object.values(chartMap).sort((a,b) => new Date(a.date) - new Date(b.date));
+
+            const ctx = document.getElementById('detailChart').getContext('2d');
+            currentChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartData.map(d => d.date),
+                    datasets: [
+                        {
+                            label: 'BigQuery Spend',
+                            data: chartData.map(d => d.bq),
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            fill: true,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'API Spend',
+                            data: chartData.map(d => d.api),
+                            borderColor: '#10b981',
+                            borderDash: [5, 5],
+                            tension: 0.1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => `${ctx.dataset.label}: ${formatCurrency(ctx.raw)}`
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 2. Paginated Table Section
+            const tableContainer = document.createElement('div');
+            tableContainer.id = 'table-container';
+            container.appendChild(tableContainer);
+            
+            renderTablePage(groupName, dataArray);
+        }
+
+        function renderTablePage(groupName, dataArray) {
+            const container = document.getElementById('table-container');
+            if(!container) return;
+            
+            if(!dataArray) dataArray = getFilteredData(groupName);
+
+            const totalPages = Math.ceil(dataArray.length / paginationState.limit) || 1;
+            const start = (paginationState.page - 1) * paginationState.limit;
+            const end = start + paginationState.limit;
+            const pageData = dataArray.slice(start, end);
+
+            let html = `
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div class="p-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
+                        <h3 class="font-bold text-gray-700">Daily Reconciliation Data</h3>
+                        <div class="flex gap-2 text-sm">
+                            <button onclick="changePage(-1)" class="px-3 py-1 bg-white border rounded hover:bg-gray-50 disabled:opacity-50" ${paginationState.page === 1 ? 'disabled' : ''}>Prev</button>
+                            <span class="px-2 py-1 text-gray-500">Page ${paginationState.page} of ${totalPages}</span>
+                            <button onclick="changePage(1)" class="px-3 py-1 bg-white border rounded hover:bg-gray-50 disabled:opacity-50" ${paginationState.page >= totalPages ? 'disabled' : ''}>Next</button>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-gray-600">
+                        <thead class="bg-gray-50 uppercase font-semibold text-gray-500">
+                            <tr>
+                                <th class="p-4">Date</th>
+                                <th class="p-4">Ad Account</th>
+                                <th class="p-4 text-right">BQ Spend</th>
+                                <th class="p-4 text-right">API Spend</th>
+                                <th class="p-4 text-right">Diff ($)</th>
+                                <th class="p-4 text-right">Diff (%)</th>
+                                <th class="p-4 text-center">Status</th>
+                                <th class="p-4 text-right">BQ Impr</th>
+                                <th class="p-4 text-right">API Impr</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            if(pageData.length === 0) {
+                 html += `<tr><td colspan="9" class="p-4 text-center text-gray-400">No data matches current filters</td></tr>`;
+            } else {
+                pageData.forEach(row => {
+                    const diff = row.api_spends - row.bigquery_spends;
+                    let pct = row.bigquery_spends > 0 ? (diff / row.bigquery_spends) * 100 : 0;
+                    
+                    const isErr = Math.abs(pct) > 1 && row.bigquery_spends > 1;
+                    const statusHtml = isErr 
+                        ? `<span class="bg-red-100 text-red-700 px-2 py-0.5 rounded font-bold">REVIEW</span>` 
+                        : `<span class="bg-green-100 text-green-700 px-2 py-0.5 rounded font-bold">OK</span>`;
+
+                    html += `
+                        <tr class="border-b border-gray-50 hover:bg-gray-50 ${isErr ? 'bg-red-50' : ''}">
+                            <td class="p-4 font-mono">${row.date}</td>
+                            <td class="p-4 font-mono text-gray-500">${row.account}</td>
+                            <td class="p-4 text-right">${formatCurrency(row.bigquery_spends)}</td>
+                            <td class="p-4 text-right">${formatCurrency(row.api_spends)}</td>
+                            <td class="p-4 text-right ${diff !== 0 ? 'font-medium' : 'text-gray-400'}">${formatCurrency(diff)}</td>
+                            <td class="p-4 text-right ${isErr ? 'text-red-600 font-bold' : ''}">${pct.toFixed(2)}%</td>
+                            <td class="p-4 text-center">${statusHtml}</td>
+                            <td class="p-4 text-right text-gray-500">${formatNum(row.bigquery_impressions)}</td>
+                            <td class="p-4 text-right text-gray-500">${formatNum(row.api_impressions)}</td>
+                        </tr>
+                    `;
+                });
+            }
+
+            html += `</tbody></table></div></div>`;
+            container.innerHTML = html;
+        }
+
+        function changePage(dir) {
+            paginationState.page += dir;
+            renderTablePage(activeGroup);
+        }
+
+        async function renderDataSource(container) {
+            container.innerHTML = '<div class="flex items-center gap-2"><div class="loader"></div> Loading configuration...</div>';
+            
+            try {
+                const [wsRes, chRes] = await Promise.all([
+                    fetch('/api/workspaces'),
+                    fetch('/api/channels')
+                ]);
+                
+                const workspaces = await wsRes.json();
+                const channels = await chRes.json();
+                
+                let html = `
+                    <div class="bg-white p-8 rounded-xl shadow-sm border border-gray-100 max-w-3xl mx-auto">
+                        <h3 class="text-lg font-bold text-gray-800 mb-6">Run Scraper</h3>
+                        
+                        <div class="space-y-6">
+                            <div>
+                                <label class="block text-sm font-bold text-gray-700 mb-2">Select Workspaces</label>
+                                <div class="h-48 overflow-y-auto border border-gray-200 rounded p-2 space-y-1">
+                                    <label class="flex items-center gap-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
+                                        <input type="checkbox" id="ws-all" onchange="toggleAllWorkspaces(this)">
+                                        <span class="font-bold">Select All</span>
+                                    </label>
+                                    ${workspaces.map(ws => `
+                                        <label class="flex items-center gap-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
+                                            <input type="checkbox" name="workspace" value="${ws.id}" class="ws-checkbox">
+                                            <span>${ws.name} <span class="text-gray-400 text-xs">(${ws.id})</span></span>
+                                        </label>
+                                    `).join('')}
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-bold text-gray-700 mb-2">Start Date</label>
+                                    <input type="date" id="scrape-start" class="w-full border border-gray-300 rounded p-2 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-bold text-gray-700 mb-2">End Date</label>
+                                    <input type="date" id="scrape-end" class="w-full border border-gray-300 rounded p-2 text-sm">
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-bold text-gray-700 mb-2">Select Channels</label>
+                                <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                    ${channels.map(ch => `
+                                        <label class="flex items-center gap-2 p-2 border border-gray-100 rounded hover:bg-gray-50 cursor-pointer">
+                                            <input type="checkbox" name="channel" value="${ch.id}" checked>
+                                            <span class="text-sm">${ch.name}</span>
+                                        </label>
+                                    `).join('')}
+                                </div>
+                            </div>
+                            
+                            <div class="pt-4 border-t border-gray-100">
+                                <button onclick="runScraper()" id="btn-run-scraper" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-md transition flex justify-center items-center gap-2">
+                                    <i class="fa-solid fa-play"></i> Run Scraper
+                                </button>
+                                <div id="scraper-status" class="mt-4 text-center text-sm text-gray-600 hidden"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                container.innerHTML = html;
+                
+                // Set default dates (last 7 days)
+                const end = new Date();
+                const start = new Date();
+                start.setDate(end.getDate() - 7);
+                document.getElementById('scrape-start').valueAsDate = start;
+                document.getElementById('scrape-end').valueAsDate = end;
+                
+            } catch (err) {
+                container.innerHTML = `<div class="text-red-600">Error loading configuration: ${err.message}</div>`;
+            }
+        }
+
+        function toggleAllWorkspaces(source) {
+            document.querySelectorAll('.ws-checkbox').forEach(cb => cb.checked = source.checked);
+        }
+
+        async function runScraper() {
+            const btn = document.getElementById('btn-run-scraper');
+            const status = document.getElementById('scraper-status');
+            
+            const workspaces = Array.from(document.querySelectorAll('input[name="workspace"]:checked')).map(cb => cb.value);
+            const channels = Array.from(document.querySelectorAll('input[name="channel"]:checked')).map(cb => cb.value);
+            const start = document.getElementById('scrape-start').value;
+            const end = document.getElementById('scrape-end').value;
+            
+            if (workspaces.length === 0) return alert('Please select at least one workspace');
+            if (channels.length === 0) return alert('Please select at least one channel');
+            if (!start || !end) return alert('Please select date range');
+            
+            btn.disabled = true;
+            btn.innerHTML = '<div class="loader"></div> Running... (this may take a while)';
+            status.classList.remove('hidden');
+            status.innerText = 'Initializing scraper...';
+            status.classList.remove('text-red-600');
+            
+            try {
+                const response = await fetch('/api/scrape', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        workspace_ids: workspaces,
+                        start_date: start,
+                        end_date: end,
+                        channels: channels
+                    })
+                });
+                
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Scraper failed');
+                }
+                
+                const data = await response.json();
+                
+                status.innerText = 'Processing data...';
+                
+                // Parse the CSV data
+                Papa.parse(data.csv, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        // Reset data
+                        globalRecordCount = 0;
+                        streamStorage = {};
+                        uniqueWorkspaces.clear();
+                        uniqueGroups.clear();
+                        processedRows = [];
+                        
+                        // Process rows
+                        results.data.forEach(row => {
+                            processRow(row);
+                            globalRecordCount++;
+                        });
+                        
+                        // Convert storage to array
+                        processedRows = Object.values(streamStorage);
+                        streamStorage = {};
+                        
+                        // Update UI
+                        document.getElementById('record-count-badge').textContent = `${globalRecordCount.toLocaleString()} Rows Scanned`;
+                        populateWorkspaceFilter();
+                        document.getElementById('filter-bar').classList.remove('hidden');
+                        document.getElementById('filter-bar').classList.add('flex');
+                        buildSidebar();
+                        
+                        status.innerText = 'Done!';
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fa-solid fa-play"></i> Run Scraper';
+                        
+                        // Switch to overview
+                        switchTab('overview');
+                    }
+                });
+                
+            } catch (err) {
+                status.innerText = `Error: ${err.message}`;
+                status.classList.add('text-red-600');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-play"></i> Run Scraper';
+            }
+        }
+
+        // --- 8. UTILITIES ---
+        const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
+        const formatNum = (val) => new Intl.NumberFormat('en-US').format(val);
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+requests
+google-cloud-bigquery
+google-cloud-datastore
+google-auth
+pandas
+tqdm
+requests-oauthlib
+tenacity
