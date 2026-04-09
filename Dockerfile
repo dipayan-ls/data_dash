@@ -1,9 +1,8 @@
 # --- Stage 1: Build the Vite Frontend ---
 FROM node:18 AS build-stage
 WORKDIR /app
-COPY package*.json ./
-RUN rm -f package-lock.json && npm install
 COPY . .
+RUN rm -rf node_modules package-lock.json && npm install
 RUN npm run build
 
 # --- Stage 2: Setup the Python Backend ---
