@@ -29,6 +29,8 @@ def load_bq_credentials() -> service_account.Credentials:
 
     if json_env:
         info = json.loads(json_env)
+        if "bigquery_credential_file" in info:
+            info = info["bigquery_credential_file"]
         return service_account.Credentials.from_service_account_info(info)
 
     if file_env and os.path.exists(file_env):
