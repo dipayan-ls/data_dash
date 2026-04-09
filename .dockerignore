@@ -1,9 +1,0 @@
-node_modules
-dist
-__pycache__
-*.pyc
-.env
-.DS_Store
-.claude
-.git
-.gitignore

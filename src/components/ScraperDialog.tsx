@@ -47,6 +47,7 @@ export const ScraperDialog: React.FC<ScraperDialogProps> = ({ isOpen, onClose })
   });
   const [granularity, setGranularity] = useState<string>('daily');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
   useEffect(() => {
     if (isOpen) {
@@ -74,7 +75,7 @@ export const ScraperDialog: React.FC<ScraperDialogProps> = ({ isOpen, onClose })
 
   const fetchWorkspaces = async () => {
     try {
-      const res = await fetch('/api/workspaces');
+      const res = await fetch(`${API_BASE}/api/workspaces`);
       if (res.ok) {
         const data = await res.json();
         setWorkspaces(data);
@@ -86,7 +87,7 @@ export const ScraperDialog: React.FC<ScraperDialogProps> = ({ isOpen, onClose })
 
   const fetchWorkspaceChannels = async (workspaceId: string) => {
     try {
-      const res = await fetch(`/api/workspace-channels?workspace_id=${workspaceId}`);
+      const res = await fetch(`${API_BASE}/api/workspace-channels?workspace_id=${workspaceId}`);
       if (res.ok) {
         const data: Channel[] = await res.json();
         setAvailableChannels(data);
@@ -108,7 +109,7 @@ export const ScraperDialog: React.FC<ScraperDialogProps> = ({ isOpen, onClose })
     setLoading(true);
     setErrorMsg(null);
     try {
-      const res = await fetch('/api/scrape', {
+      const res = await fetch(`${API_BASE}/api/scrape`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
