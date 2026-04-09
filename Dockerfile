@@ -2,7 +2,7 @@
 FROM node:18 AS build-stage
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN rm -f package-lock.json && npm install
 COPY . .
 RUN npm run build
 
