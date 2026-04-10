@@ -119,18 +119,21 @@ export const ScraperDialog: React.FC<ScraperDialogProps> = ({ isOpen, onClose })
     try {
       const res = await fetch(`${API_BASE}/api/scrape`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        headers: {
+          'Content-Type': 'text/plain',
+        },
+        body: btoa(JSON.stringify({
           workspace_ids: selectedWorkspaces.length > 0 ? selectedWorkspaces : 'all',
           start_date: dateRange.start,
           end_date: dateRange.end,
           channels: selectedChannels,
           granularity: granularity,
-        }),
+        })),
       });
 
       if (res.ok) {
-        const data = await res.json();
+        const jsonRes = await res.json();
+        const data = JSON.parse(atob(jsonRes.data));
         if (data.csv) {
           const file = new File([data.csv], data.filename || 'scraped_data.csv', {
             type: 'text/csv',

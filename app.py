@@ -89,17 +89,17 @@ def get_workspace_channels():
 
 @app.route("/api/scrape", methods=["POST"])
 def scrape():
-    """
-    Trigger the scraper and return the resulting CSV as a string.
+    """Trigger the scraper and return the resulting CSV as a string."""
+    try:
+        raw_body = request.get_data(as_text=True)
+        if raw_body:
+            decoded_body = base64.b64decode(raw_body).decode("utf-8")
+            data = json.loads(decoded_body)
+        else:
+            data = {}
+    except Exception as e:
+        return jsonify({"error": f"Invalid payload: {str(e)}"}), 400
 
-    Body (JSON):
-        workspace_ids: list[str] | "all"
-        start_date:    str  (YYYY-MM-DD)
-        end_date:      str  (YYYY-MM-DD)
-        channels:      list[str]
-        granularity:   str  (daily|monthly|yearly|overall)
-    """
-    data = request.json or {}
     workspace_ids = data.get("workspace_ids", [])
     start_date = data.get("start_date")
     end_date = data.get("end_date")
@@ -143,7 +143,10 @@ def scrape():
         csv_content = run_scraper_api(selected_workspaces, start_date, end_date, channels, granularity)
         ws_label = selected_workspaces[0][1] if len(selected_workspaces) == 1 else "MULTI"
         filename = f"combined_metrics_{ws_label}_{start_date}_to_{end_date}.csv"
-        return jsonify({"csv": csv_content, "filename": filename})
+        
+        payload = {"csv": csv_content, "filename": filename}
+        encoded = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("utf-8")
+        return jsonify({"data": encoded})
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
